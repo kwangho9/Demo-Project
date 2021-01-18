@@ -111,6 +111,7 @@
             }
         </style>
         <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+        <script type="text/javascript" src="jquery.cookie.js"></script>
     </head>
 
     <body>
@@ -156,6 +157,7 @@
         <label for="frame"><b>Frame : </b></label>
         <select id="frame" name="frameName" style="width:300px"></select>
         <input type="button" id="Analysis" value="Analysis">
+        <input type="button" id="saveAs" value="Save">
         <br>
         <br>
         <textarea id="console" cols="100" rows="10" style="display:block; resize:none"></textarea>
@@ -165,6 +167,8 @@
 
 
         <script language="javascript">
+            var cmdList = [];             // sessionStorage or Cookie
+            var cmdFrame = new Object();             // sessionStorage or Cookie
             var CurrentSwitch = new Array(120);
             var SubWindow;
             $(document).ready(function() {
@@ -201,7 +205,7 @@
                     row = $('<tr></tr>');
                     for(var c=0; c<13; c++) {
                         if( r == 0 ) {
-                            var cell = $('<th></th>');
+                            var cell = $('<th></tr>');
                             if( c == 0 ) {
                                 cell.append(
                                     $('<div></div>').prop({class: 'tooltip'}).append(
@@ -229,7 +233,7 @@
                                     $('<label></label>').prop({for: 'row'+(r-1).toString()}).html((r-1).toString())
                                 )
                             } else {
-                                var num = ((12 - c) * 10);//((11 - (c-1)) * 10) + (9 - (r-1));
+                                var num = ((11 - (c-1)) * 10) + (9 - (r-1));
                                 var cell = $('<td></td>').append(
                                     $('<div></div>').prop({class: 'tooltip'}).append(
                                         $('<input>').prop({type: 'checkbox', id: 'switch'+num.toString(), name:'switch[]', value:num.toString()})
@@ -281,7 +285,7 @@
                 nRow = parseInt($('#groupSelect').val());
                 nColumn = parseInt( Math.ceil(totalSwitch / nRow) );
                 fullSwitch = nRow * nColumn;
-                dbgout(`Total switch : ${totalSwitch}, switch map : ${nRow} x ${nColumn}\n`);
+//                dbgout(`Total switch : ${totalSwitch}, switch map : ${nRow} x ${nColumn}\n`);
 
                 var container = $("#container");
                 var table = $('<table></table>').css({ border: '1px solid #92ACBB' });
@@ -433,6 +437,9 @@
                 Bytes.push(0x0);
                 Bytes.push(0x0);
 
+//                dbgout(`Command = ${Bytes}\n`);
+                cmdFrame.cmdlist.push(Bytes);
+
                 var str = '';//`Command(${Bytes.length}) : `
                 Bytes.forEach(function(val) {
                     str += '0x' + ('0' + (val & 0xFF).toString(16)).toUpperCase().slice(-2) + ' ';
@@ -443,7 +450,17 @@
                 $('#frame').prepend($(`<option value="${str}" selected>`+str+"</option>"));
                 */
                 $('#frame').prepend($(`<option selected>`+str+"</option>"));
-                dbgout(`\nCommand(${Bytes.length}) : `+str);
+//                dbgout(`\nCommand(${Bytes.length}) : `+str);
+            }
+
+            var CmdEntry = function(device, group, cs, opcode, select) {
+                this.in = {};
+                this.in.device = device;
+                this.in.group = group;
+                this.in.cs = cs;
+                this.in.opcode = opcode;
+                this.in.select = select;
+                this.cmdlist = [];
             }
 
             function generate_command(cs, opcode, SwitchNumber, column, row) {
@@ -451,7 +468,13 @@
                 var nSelect = SwitchNumber.length;
                 var cmd = opcode & 0x07;
 
-                dbgout(`chip select = 0x${cs.toString(16)}, opcode = ${opcode}, switch count = ${nSelect}, column = 0x${column.toString(16)}, row = 0x${row.toString(16)}\n`);
+                var deviceName = $('#deviceSelect option:selected').text();
+                var groupNumber = $('#groupSelect option:selected').val();
+                cmdFrame = new CmdEntry(deviceName, groupNumber, cs, opcode, SwitchNumber);
+
+//                dbgout(`chip select = 0x${cs.toString(16)}, opcode = ${opcode}, switch count = ${nSelect}, column = 0x${column.toString(16)}, row = 0x${row.toString(16)}\n`);
+
+                // Cookie 생성.
 
 //                if( nSelect == 120 ) {          // all switch select -> single command.
                 if( nSelect == totalSwitch ) {          // all switch select -> single command.
@@ -464,7 +487,7 @@
 
                     var cCol = SetBitCount(column);
                     var cRow = SetBitCount(row);
-                    dbgout(`set bits count : column(${cCol}), row(${cRow}), select(${nSelect})\n`);
+//                    dbgout(`set bits count : column(${cCol}), row(${cRow}), select(${nSelect})\n`);
 //dbgout(`Variable : ${totalSwitch}, ${deviceType}, ${nRow}, ${nColumn}\n`);
                     var maxRow = nRow;
                     var maxCol = Math.ceil(totalSwitch/nRow);
@@ -482,10 +505,10 @@
                         } else if( cRow == nRow ) {       // all row select -> Column All Switch Command.
                             cmd |= 0x20;
                             if( nColumn > 8 ) {
-                                select.push(column >> (nColumn - 8));
-                                select.push(column << (16 - nColumn));
+                                select.push((column >> (nColumn - 8)) & 0xFF);
+                                select.push((column << (16 - nColumn)) & 0xFF);
                             } else {
-                                select.push(column << (8 - nColumn));
+                                select.push((column << (8 - nColumn)) & 0xFF);
                             }
                         } else {                        // partial colum/row select -> Column/Row Select Switch Command.
 //                            cmd |= 0x18;                // Row & Switch Select Command.
@@ -493,7 +516,7 @@
 
                             if( nColumn > 16 ) {            // PS1120 : 4/6-group(x)
                             } else if( nColumn > 8 ) {     // PS1120 : 8/10/12/-group, PS1060 : 4/6-group
-                                select.push(column >> (nColumn - 8));
+                                select.push((column >> (nColumn - 8)) & 0xFF);
                                 select.push((column << (16 - nColumn)) | ((row >> ((nRow+nColumn) - 16)) & 0xFF));   // PS1060 : 6-group
                                 if( (nColumn + nRow) > 16 ) {       // PS1120 : 10-group, PS1060 : 4/12/16-group
                                     select.push((row << (24 - (nRow+nColumn))) & 0xFF);
@@ -503,7 +526,7 @@
                                     select.push((column >> (nColumn - 8)) & 0xFF);
                                     select.push((row << (8 - nRow)) & 0xFF);
                                 } else {            // PS1060 : 10/12/16-group, PS1030 : 6/8/10/12/16-group
-                                    select.push((column << (8 - nColumn)) | ((row >> ((nRow + nColumn) - 8)) & 0xFF));
+                                    select.push(((column << (8 - nColumn)) | ((row >> ((nRow + nColumn) - 8))) & 0xFF));
                                     if( (nColumn + nRow) > 16 ) {       // PS1060 : 12/16-group, PS1030 : 16-group.
                                         // 8 - nColumn = 8 - 6 = 2, (nRow + nColumn) - 8 = 18 - 8 = 10
                                         select.push((row >> (nRow + nColumn) - 16) & 0xFF);    // (nRow + nColumn) - 16 = 18 - 16 = 2
@@ -515,7 +538,7 @@
                                 }
                             }
                         }
-
+//                        dbgout(`select : ${select}\n`);
                     } else {                    // 예외 처리
                         var rArray = new Array(10).fill(0);
                         $('input:checkbox[name="switch[]"]').each(function() {
@@ -525,7 +548,7 @@
                                 rArray[(nRow-1) - (idx % nRow)] |= (1 << ((nColumn-1) - parseInt(idx / nRow)));
                             }
                         });
-                        dbgout(toShortHexString(rArray));
+//                        dbgout(toShortHexString(rArray));
                         cArray = [];
                         for(var i=0; i<rArray.length; i++) {
                             if( rArray[i] != 0 ) {
@@ -539,7 +562,7 @@
                                 cArray.push(sel);
                             }
                         }
-                        dbgout(`${cArray.length} case : ${toShortHexString(cArray)}\n`);
+//                        dbgout(`${cArray.length} case : ${toShortHexString(cArray)}\n`);
 //                        dbgout(toShortHexString(rArray)+'\n');
 //                        dbgout(`rArray = ${toShortHexString(rArray)}, cArray = 0x${toShortHexString(cArray)}\n`);
 
@@ -560,12 +583,12 @@
                             rArray.forEach(function(rSel, idx) {
                                 if( rSel != 0 ) {
                                     select = [];
-                                    dbgout(`rSel = ${rSel}, cSel = ${cArray[n]}\n`);
+//                                    dbgout(`rSel = ${rSel}, cSel = ${cArray[n]}\n`);
                                     // PS1060 10-group : nRow(10), nColumn(6)
                                     if( nColumn > 16 ) {            // PS1120 : 4/6-group(x)
                                     } else if( nColumn > 8 ) {     // PS1120 : 8/10/12/-group, PS1060 : 4/6-group
-                                        select.push(rSel >> (nColumn - 8));
-                                        select.push((rSel << (16 - nColumn)) | ((cArray[n] >> ((nRow+nColumn) - 16)) & 0xFF));   // PS1060 : 6-group
+                                        select.push((rSel >> (nColumn - 8)) & 0xFF);
+                                        select.push(((rSel << (16 - nColumn)) | ((cArray[n] >> ((nRow+nColumn) - 16))) & 0xFF));   // PS1060 : 6-group
                                         if( (nColumn + nRow) > 16 ) {       // PS1120 : 10-group, PS1060 : 4/12/16-group
                                             select.push((cArray[n] << (24 - (nRow+nColumn))) & 0xFF);
                                         }
@@ -586,9 +609,6 @@
                                         }
                                     }
 
-//                                    select.push( (rSel & 0xFF0) >> 4 );
-//                                    select.push( ((rSel & 0x00F) << 4) | ((cArray[n] & 0x3C0) >> 6) );
-//                                    select.push( (cArray[n] & 0x3F) << 2 );
                                     if( n != (cArray.length - 1) ) {
                                         send_command(cs, cmd, select);
                                         n++;
@@ -608,7 +628,7 @@
             }
 
             $('#deviceSelect').on("change", function() {
-                dbgout(`device select = ${$(this).val()}, ${$(this).find('option:selected').attr('name')}\n`);
+//                dbgout(`device select = ${$(this).val()}, ${$(this).find('option:selected').attr('name')}\n`);
                 var name = $(this).find('option:selected').attr('name');
 
                 if( $(this).val() == 2 ) {          // PS1120
@@ -676,19 +696,23 @@
                 $('input:checkbox[name="switch[]"]').each(function() {
                     if( this.checked == true ) {
                         var idx = this.value;
-                        SwitchNumber.push(this.value);
+                        SwitchNumber.push(Number(this.value));
                         row |= (1 << (nRow - ((idx % nRow)+1)));
                         column |= (1 << (nColumn - (parseInt(idx / nRow) + 1)));
 //                        dbgout(`Variable : ${totalSwitch}, ${deviceType}, ${nRow}, ${nColumn}\n`);
 //                        dbgout(`${idx} switch : ${nRow - ((idx % nRow) + 1)}, ${nColumn - (parseInt(idx / nRow) + 1)}\n`);
                     }
                 });
-                dbgout(`Switch Select(${SwitchNumber.length}) : ${SwitchNumber}\n`);
+//                dbgout(`Switch Select(${SwitchNumber.length}) : ${SwitchNumber}\n`);
 
                 if( SwitchNumber.length == 0 ) return;
 //                if( (column == 0) || (row == 0) ) return;
 
                 generate_command(cs, opcode, SwitchNumber, column, row);
+//dbgout(`device = ${deviceName}, group = ${groupNumber}, cs = ${cs}, opcode = ${opcode}, select = ${SwitchNumber}\n`);
+                cmdList.push(cmdFrame);
+//                dbgout(`cmdList = ${JSON.stringify(cmdList)}\n`);
+//                dbgout(`cmdList length = ${cmdList.length}\n`);
 
                 command_result(opcode, SwitchNumber);
             });
@@ -869,6 +893,20 @@
                 SubWindow.document.write('</body></html>');
 //                dbgout(str);
 //                alert(str);
+            });
+
+            function filesave(filename, text) {
+                var elem = document.createElement('a');
+                elem.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+                elem.setAttribute('download', filename);
+                elem.style.display = 'none';
+                document.body.appendChild(elem);
+                elem.click();
+                document.body.removeChild(elem);
+            }
+            $(document).on('click', '#saveAs', function(e) {
+//                dbgout(`cmdList : ${JSON.stringify(cmdList)}\n`);
+                filesave("command list.json", JSON.stringify(cmdList));
             });
 
             $(document).on('change', '#frame', function(e) {
